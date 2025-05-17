@@ -38,7 +38,10 @@ import win32com.client as win32
 import codecs
 from pyexcelerate import Workbook, Color, Style, Fill
 import pyexcelerate
-
+from openpyxl.styles import numbers
+from openpyxl.styles import NamedStyle
+#file_template = dirpath() +    '\\setup_audit_template.xlsx' 
+import re 
 
 dirpath = os.getcwd()
 print (dirpath)
@@ -106,6 +109,9 @@ def generate_terminate_code ( ):
     conn.close()
     return rows
 
+list_term_code =  generate_terminate_code () 
+
+
 def dispatch(app_name:str):
     try:
         from win32com import client
@@ -147,6 +153,9 @@ def save_workbook (s_name):
 
     wb.Worksheets('Duplicate Property').Select()    
     excel.ActiveSheet.Columns.AutoFit()
+
+    wb.Worksheets('Breeze Pricing').Select()    
+    excel.ActiveSheet.Columns.AutoFit()
         
 #Save changes in a new file
     excel.DisplayAlerts = False    
@@ -167,7 +176,7 @@ def get_streettype():
     rows = cur.fetchall()
     cur.close()
     street_data = pd.DataFrame(rows, columns = col)
-    street_data = street_data.applymap(lambda x: x.lower() if pd.notnull(x) else x)
+    street_data = street_data.map(lambda x: x.lower() if pd.notnull(x) else x)
     conn.close()
     return street_data
 
@@ -221,6 +230,11 @@ concat(  left(trim(replace(coalesce(node_street_1,''), ' ',''))  , 5),
               left(trim(replace(coalesce( coalesce(replace(node_street_2, node_street_1,''), ''),'') , ' ','') )  , 3), 
            left(trim(coalesce(NOD.node_city,'')), 3),
  left(trim(coalesce(node_zip,'')),3),  (market_rate_units )) dd_2
+              
+     --         concat(  left(trim(replace(coalesce(node_street_1,''), ' ',''))  , 5), 
+          --    left(trim(replace(coalesce( coalesce(replace(node_street_2, node_street_1,''), ''),'') , ' ','') )  , 3), 
+       --    left(trim(coalesce(NOD.node_city,'')), 3),
+ --left(trim(coalesce(node_zip,'')),3)) dd_2
  
 from node_tbl NOD inner join company_tbl on  company_tbl.company_code = NOD.company_code 
               left join breeze_url on breeze_url.company_code = NOD.company_code 
@@ -230,12 +244,186 @@ and node_code not  in  (select node_code from node_suspension_details where susp
    
  and suspended = true )
  and   ( coalesce(breeze_package,'') = '' or  coalesce(breeze_package,'') = 'BreezePremier') 
-and coalesce(first_applicant,'1/1/1900') > '1/1/1900'             
+and coalesce(first_applicant::date,'1/1/1900') > '1/1/1900'             
   
 
 """  )
     return SQL
+
+
+def connect_rentgrow_data_frame(cus_sql):
      
+    conn = None
+ 
+    params = config()
+    conn = psycopg2.connect(**params)       
+    cur = conn.cursor()
+   
+    
+    string_replace = "  ('" + "','".join(name.upper().strip().replace("'", r"\'") for name in list_term_code) + "'"  + ')'
+   # SQL_1 =  (o_SQL).replace( regexp=True, to = "request.company_code not in ('APP') ", value = string_replace    )
+    cus_sql =  (cus_sql).replace(   "('APP')",   string_replace     ) #live
+    
+    SQL =  cus_sql
+    cur.execute(SQL) 
+    col = [i[0] for i in cur.description]
+    conn.set_client_encoding('ISO-8859-1') 
+    rows = cur.fetchall()
+    cur.close()
+    data = pd.DataFrame(rows, columns = col)
+   
+    return data
+
+
+def connect_breeze_premier_model(w_start_date, w_end_date):
+
+    conn = None
+ 
+    params = config()
+    conn = psycopg2.connect(**params)       
+    cur = conn.cursor()
+     
+    SQL = (""" SELECT CT.company_code, CT.company_name,   NT.node_code, node_name,
+           case AXC.pricing_model
+	WHEN '0' THEN 'NOT SET'
+	WHEN '1' THEN 'Transactional - Standard'
+	WHEN '2' THEN 'Transactional - Bundled'
+	WHEN '3' THEN 'Unit-Monthly'
+	WHEN '4' THEN 'Unit-Quarterly'
+	WHEN '5' THEN 'Unit_Annual'
+	WHEN '6' THEN 'Manual'
+	WHEN '7' THEN 'Mixed'
+	ELSE NULL
+	END AS company_pricing_model,  
+
+	case AXN.pricing_model
+	WHEN '0' THEN 'NOT SET'
+	WHEN '1' THEN 'Transactional - Standard'
+	WHEN '2' THEN 'Transactional - Bundled'
+	WHEN '3' THEN 'Unit-Monthly'
+	WHEN '4' THEN 'Unit-Quarterly'
+	WHEN '5' THEN 'Unit_Annual'
+	WHEN '6' THEN 'Manual'
+	WHEN '7' THEN 'Mixed'
+	ELSE NULL
+	END AS node_pricing_model ,
+
+case when breeze_package is null then 'Standard' else  breeze_package end as "Company Type"  
+FROM node_tbl AS NT
+FULL JOIN company_tbl AS CT
+ON NT.company_code = CT.company_code
+ 
+FULL JOIN auxiliary_node AS AXN
+ON NT.node_code = AXN.node_code
+FULL JOIN auxiliary_company AS AXC
+ON CT.company_code = AXC.company_code
+  left join breeze_url on breeze_url.company_code = NT.company_code
+ 
+where NT.canceled = 'f' and (   coalesce(breeze_package,'') = 'BreezePremier') and NT.company_code not in ('APP')
+ and  NT.create_stamp >= '%s' and  NT.create_stamp<'%s'
+ ORDER BY NT.company_code, NT.node_code, 1;
+
+; """ % (w_start_date,  w_end_date))
+    
+    return SQL
+     
+
+def connect_breeze_premier_price(w_start_date, w_end_date):
+
+    conn = None
+ 
+    params = config()
+    conn = psycopg2.connect(**params)       
+    cur = conn.cursor()
+     
+    SQL = (""" SELECT NT.node_code,  index_stamp, transaction_code  , price
+ 
+           
+FROM node_tbl AS NT
+inner JOIN current_price_plans AS CT
+ON NT.node_code = CT.node_code inner join breeze_url on breeze_url.company_code = NT.company_code
+  
+ 
+where NT.canceled = 'f' and (   coalesce(breeze_package,'') = 'BreezePremier') and NT.company_code not in ('APP')
+           and start_date <'%s'  and end_date > '%s'  
+ and  NT.create_stamp >= '%s' and  NT.create_stamp<'%s'
+ ;
+
+; """ % (w_start_date,  w_end_date,w_start_date,  w_end_date))
+    
+    return SQL
+
+def run_transaction_part( df_pricing, df_no_charge_final):
+      
+ 
+    #df_trans = connect_rentgrow_data_frame (generate_trans_sql(start_date, end_date))
+    #df_invoice = connect_rentgrow_data_frame (generate_invoice_zero_sql(start_date, end_date))
+    #df_no_charge =   pd.merge(df_trans, df_invoice ,on = [  "node_code"  ], how='inner')
+
+    if (len(df_no_charge_final) < 1):
+        return df_no_charge_final
+ 
+    df_no_charge_final = df_no_charge_final.sort_values (by=[ 'node_code', 'transaction_code','index_stamp'])
+    df_no_charge_final= df_no_charge_final.drop_duplicates(subset=['node_code', 'transaction_code' ], keep='last' )
+    
+ 
+    aggFunc = { 
+        #   'transaction_uuid' : np.count_nonzero,
+            'price' :  max
+  
+           }
+
+    #'Property Name','company_code',, 'total' margins=True, margins_name='Grand Total'
+    df_no_charge_final = pd.pivot_table(df_no_charge_final,index=[ "node_code" ] ,
+                                     aggfunc=aggFunc, columns=[  'transaction_code'],
+                                    values=["price"] ,  dropna=False, fill_value=0, ).reset_index()
+    
+
+  
+     
+    #df_no_charge_final.columns = df_no_charge_final.columns.astype(str).str.replace('count_tran', '').str.replace('(', '').replace(')', '')
+    df_no_charge_final.columns = ['_'.join(col) for col in df_no_charge_final.columns.values]
+   
+    df_no_charge_final.rename(columns=lambda x: x.replace('price', 'Price'), inplace=True)
+    df_no_charge_final.rename(columns=lambda x: x.replace("('',", '').replace("')", '').replace(')', ''), inplace=True)
+    df_no_charge_final.rename(columns=lambda x: x.strip(), inplace=True)
+
+ 
+    df_no_charge_final.replace( np.nan, '',inplace = True)
+ 
+    
+    df_no_charge_final = pd.DataFrame(df_no_charge_final.to_records())
+    df_no_charge_final.rename(columns=lambda x: x.replace('node_code_', 'node_code'),  inplace=True)
+    df_no_charge_final = pd.merge( df_no_charge_final,df_pricing  ,on = ['node_code'], how='left')
+
+    df_no_charge_final = df_no_charge_final.sort_values (by=[ 'company_code', 'node_name'])
+    df_no_charge_final = df_no_charge_final.reset_index(drop=True)
+    df_no_charge_final = df_no_charge_final.drop('index', axis=1)
+
+    for i, col in enumerate(df_no_charge_final.columns):
+           if re.search('price', col, re.IGNORECASE):
+               df_no_charge_final[col] = df_no_charge_final[col].apply(lambda x: float(x))
+
+    col = df_no_charge_final.pop ('company_code')
+    df_no_charge_final.insert(0, col.name, col)
+
+    col = df_no_charge_final.pop ('company_name')
+    df_no_charge_final.insert(1, col.name, col)
+    #cols_at_end = ['company_code','company_name' ,'node_code',  'node_name', 'company_pricing_model','node_pricing_model','Price_DOCVERIFY','Price_NOVAINCOME','Price_RENTHISTORY','DOCVERIFY','NOVAINCOME','RENTHISTORY','Monthly Invoice$','canceled','amt']
+    #df_no_charge_final = df_no_charge_final[ cols_at_end + [ col for col in df_no_charge_final.columns if col not in cols_at_end ]]
+    col = df_no_charge_final.pop ('node_code')
+    df_no_charge_final.insert(2, col.name, col)
+   
+    col = df_no_charge_final.pop ('node_name')
+    df_no_charge_final.insert(3, col.name, col)
+
+    col = df_no_charge_final.pop ('company_pricing_model')
+    df_no_charge_final.insert(4, col.name, col)
+
+    col = df_no_charge_final.pop ('node_pricing_model')
+    df_no_charge_final.insert(5, col.name, col)
+    return df_no_charge_final 
+
 def connect_new_prop(w_start_date, w_end_date):
     
     street_type = get_streettype()
@@ -536,9 +724,13 @@ def connect_linked_nodes( ):
     cur.close()
     return df_monthly_fee_unit 
 
- 
+
 
 def write_dup_book(header, df_new,  ws):
+
+    if (len(df_new)==0):
+         ws.cell(2,1,  'No Data')  
+         return 
           
     for x in range(1,len(df_new.columns)+1):
          
@@ -569,7 +761,8 @@ def write_dup_book(header, df_new,  ws):
     ws.auto_filter.ref = 'A1:X1'
     ws.freeze_panes ='A2'
 
-  
+
+
 
 def write_new_book(header, df_new,   ws):
    
@@ -591,6 +784,75 @@ def write_new_book(header, df_new,   ws):
     
     ws.auto_filter.ref = 'A1:T1'
     ws.freeze_panes ='A2'
+
+
+def columnToLetter(column):
+    letter = ''
+    while column > 0:
+        temp = (column - 1) % 26
+        letter = chr(temp + 65) + letter
+        column = (column - temp - 1) // 26
+    return letter
+ 
+def letterToColumn(letter):
+    column = 0
+    length = len(letter)
+    for i in range(length):
+        column += (ord(letter[i].upper()) - 64) * 26**(length - i - 1)
+    return column
+
+def  format_pricing_book( df_no_charge_final,  ws ):
+
+
+
+    if (len(df_no_charge_final)==0):
+         ws.cell(2,1,  'No Data')  
+         return 
+    
+    dollar_style = NamedStyle(name="dollar_style", number_format='$#,##0.00')
+    for i, col in enumerate(df_no_charge_final.columns):
+           column_letter = columnToLetter(i+1)
+           if re.search('price', col, re.IGNORECASE):
+               for cell in ws[column_letter]:  # Change 'B' to your target column
+                  cell.style = dollar_style
+          # column_len = max(df_no_charge_final[col].astype(str).str.len().max(), len(col))  
+         #   ws.set_column(i, i, column_len) 
+           #ws.column_dimensions[column_letter].width = column_len
+    
+    for x in range(1,len(df_no_charge_final.columns)+1):
+         
+        ws.cell(1, x).fill = redFill     
+        ws.cell(1, x).font = Font(color="FFFFFF", name="Verdana", size=12)   
+        ws.cell(1, x).alignment = Alignment(horizontal='left', vertical = 'center')
+
+    thick_border = Border(
+  
+    top=Side(border_style='thick', color='00000000') )
+   
+      
+    o_companycode=''
+    df_no_charge_final.reset_index(inplace = True,drop = True)
+
+    for index, row in df_no_charge_final.iterrows():
+        if (o_companycode != str(row[0])  ):
+            for col_num  in range(1, len(df_no_charge_final.columns)+1):
+                 ws.cell(index+2, col_num).border = thick_border           
+      
+        ws.cell(index+2, col_num).alignment = Alignment(horizontal='left', vertical = 'center')
+        
+        o_companycode = str(row[0])  
+
+    for col_num  in range(1, len(df_no_charge_final.columns)+1):
+        ws.cell( ((index+3)), col_num).border = thick_border 
+        ws.cell(index+3, col_num).alignment = Alignment(horizontal='left', vertical = 'center')
+
+    ws.auto_filter.ref = 'A1:O1'
+    ws.freeze_panes ='E2'
+ 
+
+ 
+    #ColumnDimension(ws, bestFit=True)
+
 
 def send_to_finance(filename1):
 
@@ -617,7 +879,7 @@ def send_to_finance(filename1):
     outlook = win32.Dispatch('outlook.application')
     mail = outlook.CreateItem(0)
     mail.To = "xiaobin.zhang@yardi.com"
-    mail.Subject = "Weekly New Property List Report - Susan.Sheppard@Yardi.Com ;  Jacqui.Adler@Yardi.Com ;  Neha.Bansal@Yardi.Com ;  Odilia.Walker@Yardi.Com"  
+    mail.Subject = "Weekly New Property List Report - Susan.Sheppard@Yardi.Com ;  Jacqui.Adler@Yardi.Com ;  Neha.Bansal@Yardi.Com "  
     filename2 =  filename1.replace('O:\\ANALYTICS\\New Property Lists\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\New Property Lists\\') # + filename.replace("/", ".") + ".xlsx"
         #path  = "\"\\\\windows_Server\\golobal_directory\\the folder\\file yyymm.xlsx\""
     path = '"' + filename2 + '"'
@@ -683,42 +945,77 @@ def send_book( filename1, recipient, filename2=''):
         mail.send
 
 if __name__ == '__main__':
-    
+        
+
+        if os.path.exists(filename1 ):
+           # send_to_finance(filename1) 
+           os.remove(filename1)
+
+        if os.path.exists(filename1 ):
+           # send_to_finance(filename1) 
+           os.remove(filename1)
+        else:
+         
+
+            df_new_prop = connect_new_prop (w_start_date, w_end_date)
+
+            df_weekly_data = connect_weekly_dup(w_start_date, w_end_date)
+
+            data = connect_a(df_weekly_data)
+
+            df_prem_model  = connect_rentgrow_data_frame (connect_breeze_premier_model(w_start_date, w_end_date )) 
+            df_prem_price   = connect_rentgrow_data_frame (connect_breeze_premier_price(w_start_date, w_end_date )) 
+            df_price_final    = run_transaction_part( df_prem_model ,df_prem_price )
+            
+            writer2 = pd.ExcelWriter(filename1)
+            
+            df_new_prop.to_excel (writer2,  sheet_name= 'New Property', index=False, startrow=0)
+            data.to_excel (writer2,  sheet_name= 'Duplicate Property', index=False, startrow=0)
+            
+            df_price_final.to_excel(writer2, index = False, header=True,   sheet_name = 'Breeze Pricing' ) #float_format='%.00f',header=True,
+
+            writer2.close() 
+
+
+
+            wb = load_workbook(filename1)
+
+            ws = wb['Breeze Pricing'] 
+            format_pricing_book (df_price_final, ws)
+
      
+            ws = wb['Duplicate Property']
  
-    df_new_prop = connect_new_prop (w_start_date, w_end_date)
+            write_dup_book(filename1, data,   ws)
+
+            ws = wb['New Property']
+            write_new_book(filename1, df_new_prop,  ws)
  
-    df_weekly_data = connect_weekly_dup(w_start_date, w_end_date)
+            wb.save(filename1)
 
-    data = connect_a(df_weekly_data)
+ 
+            save_workbook (filename1)
+        
+
+            f = open("weekly_property_error.txt", "w") 
+            error = 0
+            try:
+                 send_to_finance(filename1) 
+                 #os.remove(filename1)
+                 
+        # send_book (filename1, 'xiaobin.zhang@yardi.com' )
+
+            except Exception as Argument:
+
+                f.write(str(Argument))
+                error =1   
     
-    #data.to_excel (filename1, sheet_name='duplidate property', index=False) #, startrow=0
+            finally:
+                f.close() 
 
-    writer2 = pd.ExcelWriter(filename1)
-    df_new_prop.to_excel (writer2,  sheet_name= 'New Property', index=False, startrow=0)
-    data.to_excel (writer2,  sheet_name= 'Duplicate Property', index=False, startrow=0)
-    
-    writer2.close() 
-    
-
-
-    wb = load_workbook(filename1)
-    ws = wb['Duplicate Property']
-
-
-    write_dup_book(filename1, data,   ws)
-   
-    ws = wb['New Property']
-    write_new_book(filename1, df_new_prop,  ws)
-    
-    wb.save(filename1)
-    
-    save_workbook (filename1)
-    send_to_finance(filename1) 
-   # send_book (filename1, 'xiaobin.zhang@yardi.com' )
-
-  
-    
+                if (error ==0 and os.path.exists(f.name)): 
+                    os.remove(f.name)
+     
     
 sys.exit(0)
 quit()

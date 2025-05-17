@@ -1,5 +1,5 @@
  
-#from tkinter import FIRST
+#from tkinter import FIRST Spire.XLS
 import psycopg2
  
 import datetime
@@ -51,14 +51,15 @@ today =  date.today()
  
 file_template = dirpath +    '\\setup_audit_template.xlsx' 
 #filename1 = "O:\\ANALYTICS\\Setup_Audit\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Company Node).xlsx"
-filename1_1 = "c:\\temp\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Company Node).xlsx" 
+filename1_1 = "c:\\APP\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Company Node).xlsx" 
+filename1_1_tmp = "c:\\APP\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Company Node).xlsb"
 filename1_2 = "O:\\ANALYTICS\\Setup_Audit\\Setup Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Company Node).xlsb"
 
 
-filename2_1 = "c:\\temp\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Criminal Policy).xlsx" 
+filename2_1 = "c:\\APP\\Set Up Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Criminal Policy).xlsx" 
 filename2_2 = "O:\\ANALYTICS\\Setup_Audit\\Setup Audit "  +  today.strftime("%m/%d/%Y").replace('/','.')   + "(Criminal Policy).xlsb"
   
-  
+''' 
 def connect_acct_manager():
     params = config2()
     conn = psycopg2.connect(**params)       
@@ -75,12 +76,35 @@ group by company_code
     acct_am = pd.DataFrame(rows, columns = col)
     cur.close()
     return acct_am
+'''  
+def generate_terminate_code ( ):
+    conn = None
+    params = config2()
+    
+    conn = psycopg2.connect(**params )
+ 
+    cur = conn.cursor()
+
+    SQL = ("""   select trim(company_code)  from "Test_Code_Master"  ; """   )
+        
+    cur.execute(SQL) 
+    #col = cur.description
+    col = [i[0] for i in cur.description]
+    a = np.array(col)
+    rows =   [item[0] for item in cur.fetchall()]
+            
+    #df_codes = pd.DataFrame(rows, columns = a)
+    cur.close()
+    conn.close()
+    return rows
+
+list_term_code =  generate_terminate_code () 
 
 ##### weekly
 
 def generate_company_sql ():
     SQL =    ( """  set client_encoding to 'SQL_ASCII' ; 
-select trim(company_tbl.company_code) as "Company_Code", '    ' as "Account Manager",
+select trim(company_tbl.company_code) as "Company_Code", company_tbl.contact_name, ac.contact_email, ac.account_manager , --'    ' as "Account Manager",
 case ac.pricing_model	WHEN '0' THEN 'NOT SET' WHEN '1' THEN 'Transactional - Standard'	WHEN '2' THEN 'Transactional - Bundled' WHEN '3' THEN 'Unit-Monthly' WHEN '4' THEN 'Unit-Quarterly' WHEN '5' THEN 'Unit_Annual' WHEN '6' THEN 'Manual' WHEN '7' THEN 'Mixed' ELSE NULL END AS "Company_Pricing_Model", 
 case when isfee_mgmt_company = false then 'No' else 'Yes' end as "Fee_Manager_Company" ,
 case when export_to_ycrm = false then 'No' else 'Yes' end as "Export_to_yCRM",
@@ -94,6 +118,10 @@ case when autogenerate_fcra_pdf =false then 'No' else 'Yes' end  "Auto_Generate_
 case when show_matrix_report =false then 'No' else 'Yes' end   "Show_Benchmark_Report",
 case when enable_prequal_screening =false then 'Disabled For Company' else 'Eabled For Company' end as    "Enable_Pre-Qual",
 case when suppress_voyager_landing_page =false then 'Disabled For Company' else 'Enabled For Company' end as  "Suppress_Full_Applicant_File",
+             UPPER(CAST (ac.tsr_email_delivery as text)) as tsr_email_delivery,            
+              translate(lower( trim(ac.tsr_notification_email)  ), ' ''àáâãäéèëêíìïîóòõöôúùüûçÇ', '--aaaaaeeeeiiiiooooouuuucc') tsr_notification_email,
+
+              ac.suppress_validation_workflow,  ac.suppress_cancel_voi , ac.suppress_rralink, 
 client_pre_decision_email as "Criminal Records Assessment Email",  
 autoemail_fcraletter    "Auto_Email_FCRA_Letters",
 case when hold_until_active_app_processs = TRUE then 'Yes' else 'No' end AS "Hold_until_all_Active_Applicants_in_Group_are_Processed",
@@ -101,8 +129,8 @@ case when coalesce(send_fcraletter_after_hours,0) <=1 then send_fcraletter_after
 case when use_fcra_template_comp =false then 'No' else 'Use System Template' end as "Enable_Template", 
 case when include_logo_comp='fcraletter' then 'FCRA Letter' when include_logo_comp='off' then 'Off' else include_logo_comp end as "Include_Logo",
 'Enabled For Company' as "Show_Specific_Reasons_for_Result",
-company_customized_text as "Custom_Conditional_Text",
-fcra_custom_reject_text as "Custom_Reject_Text",  
+left(company_customized_text, 30000) as "Custom_Conditional_Text",
+left(fcra_custom_reject_text, 30000) as "Custom_Reject_Text",  
 
 case when fcra_batch_processing =false then 'No' else 'Yes' end as "Enable_FCRA_Batch_Processing",--
 case when showcredit_summaryrsexec =false then 'No' else 'Yes' end as "Show_Credit_Summary_in_RSExec",
@@ -114,8 +142,9 @@ case when credit_no_ssn =false then 'No' else 'Yes' end as "Process_Credit_for_N
  from autogenerate_fcraletter_config where id in (select max(id) from autogenerate_fcraletter_config where COALESCE(comp_code,'')<>''  and COALESCE(node_code,'')=''  group by comp_code)
   ) fcra on  comp_code = company_tbl.company_code
 inner join (select company_code as com_code from node_tbl where canceled = false group by company_code) node_tbl on node_tbl.com_code = company_tbl.company_code
-where  active = 'True' --company_tbl.company_code = 'WMP' and
-order by 1     --  limit 1111
+where  active = 'True' 
+              and upper(trim(company_tbl.company_code)) not in ('APP')
+order by 1     
              
   
 
@@ -168,9 +197,11 @@ UPPER(CAST (an.allow_fcra_letter_generation as text)) allow_fcra_letter_generati
 UPPER(CAST (autoemail_fcraletter as text)) as Auto_Email_Adverse_Action_Letters, 
 UPPER(CAST (hold_until_active_app_processs as text)) as "Hold Until All Active Applicants are Processed", 
 send_fcraletter_after_hours Email_FCRA_Letters_every, 
-an.fcra_customized_text as "Custom Conditional Text", an.fcra_custom_reject_text "Custom Reject Text", 
+left(an.fcra_customized_text,100) as "Custom Conditional Text", 
+              left(an.fcra_custom_reject_text,100) "Custom Reject Text", 
  to_char(created_on , 'MM/DD/YYYY'::text) start_date,
-
+ 
+   UPPER(CAST (an.tsr_email_delivery as text)) as tsr_email_delivery, 
 cp.cred_prod_name AS credit_product,
 	an.vax_policy AS "Credit Policy (CDS)",
 	an.delq_cutoff AS Delinq_Cutoff,
@@ -348,7 +379,7 @@ end ssv_num_of_month,
 /*Credit Report Options*/
 	UPPER(CAST((credit_report&1 > 0) AS TEXT)) AS suppress_details, 
 UPPER(CAST((credit_report&4 > 0) AS TEXT)) AS Suppress_Items_for_Review,
- 
+ an.suppress_voyager_page as suppress_applicant_file,   an.node_suppress_validation_workflow,  an.node_suppress_cancel_voi, voi_manual_additional_income, 
  UPPER(CAST (include_logo as text)) include_logo ,
  
         UPPER(CAST((an.rental_history&4>0) AS TEXT)) AS show_tenant_information,
@@ -459,10 +490,9 @@ when '4' then 'Enable Both'
 when '0' then 'Disabled'
 when '1' then 'Enable Civil Court'  
 when '2' then 'Enable Rental History' 
-end as pandemic_era_civil_court_filter,  to_char( pandemic_start_date , 'MM/DD/YYYY' ) pandemic_start_date,  to_char( pandemic_end_date , 'MM/DD/YYYY' )  as pandemic_end_date
- 
-
-
+end as pandemic_era_civil_court_filter,  to_char( pandemic_start_date , 'MM/DD/YYYY' ) pandemic_start_date,  to_char( pandemic_end_date , 'MM/DD/YYYY' )  as pandemic_end_date,
+              ac.account_manager
+  
 
 FROM node_tbl nt
 LEFT JOIN account_tbl as BA ON nt.node_code = BA.account_code
@@ -607,10 +637,9 @@ LEFT JOIN (
             from vs_node_services where  service_code = 'VS_ASSET_VER') av_service on nt.node_code = av_service.node_code
 
 WHERE nt.canceled <> 'T'   
-and  nt.company_code not in (
-'APP','APP2','APPCK','AUTO','BETAA','BZ001 ','BZ002','BZ655','BZ689','BZ805','BZ890','BZ903','BZ907','BZ965','BZB22','BZB27','BZB92','BZC78','BZC79','BZF80','BZG46','DEMO','ESLES','FAKE','GEN2','GREYT','INTF2','INTF3','INTF4','INTFC','PRCRD','RCCRM','RGSAL','RGSW','RGTST','RICHC','RICHD','RICHE','RICHK','SALES','STIJL','SWDMO','SWRKS','TEST9','TESTR','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK','SYLJ','RICHT','2SYLJ','BZL65')
-ORDER BY nt.company_code, nt.node_code  
-    --- limit 1111   
+and  nt.company_code  not in ('APP')
+ORDER BY nt.company_code, nt.node_code   
+   
   
 
 """  )
@@ -623,11 +652,11 @@ def generate_address_sql():
               node_zip, market_rate_units,
               email_for_bulk_invoices as "E-mail For Bulk Invoices"
 From node_tbl left join auxiliary_node on auxiliary_node.node_code = node_tbl.node_code  where   canceled = false
-and    company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ001 ','BZ002','BZ655','BZ689','BZ805','BZ890','BZ903','BZ907','BZ965','BZB22','BZB27','BZB92','BZC78','BZC79','BZF80','BZG46','DEMO','ESLES','FAKE','GEN2','GREYT','INTF2','INTF3','INTF4','INTFC','PRCRD','RCCRM','RGSAL','RGSW','RGTST','RICHC','RICHD','RICHE','RICHK','SALES','STIJL','SWDMO','SWRKS','TEST9','TESTR','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK','SYLJ','RICHT','2SYLJ','BZL65')  
- --and node_tbl.company_code = 'WPMC'
+and    company_code  not in ('APP')
+ 
     
 order by 1,   3,  2  
- ---limit 1111
+ 
 
 """  )
     return SQL
@@ -644,7 +673,8 @@ rs_policy_civilcourt_record , company_tbl
 where rs_policy_civilcourt_record.policy_id =rs_policy_details.policy_id     and  record_seq<>0 and company_tbl.company_code = rs_policy_details.company_code
 and  (trim(lower(policy_status)) in ( 'draft', 'active',  'ppreview')  and trim(lower(status)) ='active' ) 
 and    company_tbl.company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ002','BZ655','BZ805','BZ890','BZ907','BZ922','BZ965','BZB27','BZB92','DEMO','FAKE','GEN2','GREYT','INTFC','INTF2','INTF3','INTF4','RCCRM','RICHC','RICHD','SALES','TEST ','TEST9','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK')   and company_tbl.active ='True'
-     and not exists (select attachmentname, company_code  from attachment_property_reference,  attachment_property_master 
+    and company_tbl.company_code not in (select company_code from node_tbl group by company_code having max(canceled::int) = min(canceled::int) and min(canceled::int)=1)
+         and not exists (select attachmentname, company_code  from attachment_property_reference,  attachment_property_master 
 	
 	where  attachment_property_reference.attachmentpropmasterid =attachment_property_master."id"
 	and  refid in (select max(refid) from attachment_property_reference, attachment_property_master 
@@ -652,8 +682,7 @@ and    company_tbl.company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ
 	 group by attachmentname, company_code )
 	and lower(attachment_property_reference.status)  in ( 'inactive' )
 	and attachment_property_master.company_code = company_tbl.company_code and policy_name = attachmentname)
-and  company_tbl.company_code not in (
-'APP','APP2','APPCK','AUTO','BETAA','BZ001 ','BZ002','BZ655','BZ689','BZ805','BZ890','BZ903','BZ907','BZ965','BZB22','BZB27','BZB92','BZC78','BZC79','BZF80','BZG46','DEMO','ESLES','FAKE','GEN2','GREYT','INTF2','INTF3','INTF4','INTFC','PRCRD','RCCRM','RGSAL','RGSW','RGTST','RICHC','RICHD','RICHE','RICHK','SALES','STIJL','SWDMO','SWRKS','TEST9','TESTR','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK','SYLJ','RICHT','2SYLJ','BZL65')
+and  company_tbl.company_code  not in ('APP')
 order by 1, 2, 3,   record_seq   
 --limit 11
              
@@ -677,10 +706,27 @@ and company_tbl.company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ002
 	 group by attachmentname, company_code )
 	and lower(attachment_property_reference.status)  in ( 'inactive' )
 	and attachment_property_master.company_code = company_tbl.company_code and policy_name = attachmentname)
+               and company_tbl.company_code not in (select company_code from node_tbl group by company_code having max(canceled::int) = min(canceled::int) and min(canceled::int)=1)
 and  company_tbl.company_code not in (
 'APP','APP2','APPCK','AUTO','BETAA','BZ001 ','BZ002','BZ655','BZ689','BZ805','BZ890','BZ903','BZ907','BZ965','BZB22','BZB27','BZB92','BZC78','BZC79','BZF80','BZG46','DEMO','ESLES','FAKE','GEN2','GREYT','INTF2','INTF3','INTF4','INTFC','PRCRD','RCCRM','RGSAL','RGSW','RGTST','RICHC','RICHD','RICHE','RICHK','SALES','STIJL','SWDMO','SWRKS','TEST9','TESTR','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK','SYLJ','RICHT','2SYLJ','BZL65')
 order by 1, 2, 3,  rs_policy_grade_risk_recommendation.record_seq    
 
+    --  limit 11       
+  
+
+"""  )
+    return SQL
+
+def generate_aal_sql ():
+    SQL =    ( """              select node_tbl.company_code, node_tbl.node_code, node_name, category, file_type, file_name, node_static_files_mapping.dc_workflow as "Conditional Offer Email", 
+              node_static_files_mapping.preaal_workflow as "Tiered AAL Email"   from node_static_files_mapping, node_tbl,company_static_files  where --node_static_files_mapping.node_code =  'ED544'
+                  node_tbl.node_code = node_static_files_mapping.node_code 
+                 
+								and node_static_files_mapping.company_static_files_id = company_static_files."id"
+                and canceled = 'f' --and category = 'PREAAL' 
+                and status = 't'
+				and node_tbl.company_code not in ('APP')				 
+                order by node_tbl.company_code, node_name, node_code
     --  limit 11       
   
 
@@ -705,7 +751,8 @@ from rs_policy_criminal_record where record_seq = 1 and COALESCE(return_records,
 where rs_policy_criminal_record.policy_id =rs_policy_details.policy_id  and     (trim(lower(policy_status)) in ( 'draft', 'active',  'ppreview')  and trim(lower(status)) ='active' )    and  record_seq<>0
   and company_tbl.company_code = rs_policy_details.company_code and company_tbl.active ='True'
 and    company_tbl.company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ002','BZ655','BZ805','BZ890','BZ907','BZ922','BZ965','BZB27','BZB92','DEMO','FAKE','GEN2','GREYT','INTFC','INTF2','INTF3','INTF4','RCCRM','RICHC','RICHD','SALES','TEST ','TEST9','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK')   
-    and not exists (select attachmentname, company_code  from attachment_property_reference,  attachment_property_master 
+    and company_tbl.company_code not in (select company_code from node_tbl group by company_code having max(canceled::int) = min(canceled::int) and min(canceled::int)=1)
+               and not exists (select attachmentname, company_code  from attachment_property_reference,  attachment_property_master 
 	
 	where  attachment_property_reference.attachmentpropmasterid =attachment_property_master."id"
 	and  refid in (select max(refid) from attachment_property_reference, attachment_property_master 
@@ -713,8 +760,7 @@ and    company_tbl.company_code not in ( 'APP','APP2','APPCK','AUTO','BETAA','BZ
 	 group by attachmentname, company_code )
 	and lower(attachment_property_reference.status)  in ( 'inactive' )
 	and attachment_property_master.company_code = company_tbl.company_code and policy_name = attachmentname)
-and  company_tbl.company_code not in (
-'APP','APP2','APPCK','AUTO','BETAA','BZ001 ','BZ002','BZ655','BZ689','BZ805','BZ890','BZ903','BZ907','BZ965','BZB22','BZB27','BZB92','BZC78','BZC79','BZF80','BZG46','DEMO','ESLES','FAKE','GEN2','GREYT','INTF2','INTF3','INTF4','INTFC','PRCRD','RCCRM','RGSAL','RGSW','RGTST','RICHC','RICHD','RICHE','RICHK','SALES','STIJL','SWDMO','SWRKS','TEST9','TESTR','TRAIN','TSEXE','TSTER','VOYA','XTEST','YASC','YRK','SYLJ','RICHT','2SYLJ','BZL65')
+and  company_tbl.company_code  not in ('APP')
  order by 1, 2, 3,   record_seq     
 
  -- limit 11
@@ -731,10 +777,13 @@ def connect_rentgrow_data_frame(cus_sql):
     conn = psycopg2.connect(**params)       
     cur = conn.cursor()
   
-    SQL =  cus_sql
+   
     
- 
-
+    string_replace = "  ('" + "','".join(name.upper().strip().replace("'", r"\'") for name in list_term_code) + "'"  + ')'
+   # SQL_1 =  (o_SQL).replace( regexp=True, to = "request.company_code not in ('APP') ", value = string_replace    )
+    cus_sql =  (cus_sql).replace(   "('APP')",   string_replace     ) #live
+    
+    SQL =  cus_sql
     cur.execute(SQL) 
     col = [i[0] for i in cur.description]
     conn.set_client_encoding('ISO-8859-1') 
@@ -764,9 +813,7 @@ def format_book(wb, ws, df_db, node_code=""):
     else:
         rows = 1
         columns=0
-
-    
-
+ 
     ws.panes = pyexcelerate.Panes(columns, rows)
     ''' 
     if (node_code == "Node" or node_code == "Company"):
@@ -782,62 +829,86 @@ def format_book(wb, ws, df_db, node_code=""):
     #ws.get_row_style(1).alignment.wrap_text = True 
     
     if (node_code == "Node"): 
-        for col in range (67,84):
+        for col in range (68,85):
             ws.set_cell_style(1, col, Style(fill=Fill(background=Color(255,218,185))))
-   
-    
+            ws.set_col_style(col, Style(size=25))
+    elif (node_code == "Company"): 
+            for col in range(1, len(df_db.columns)+1,1):
+                ws.set_col_style(col, Style(size=25))
+    else:
+        for col in range(1, len(df_db.columns)+1,1):
+ 
+           ws.set_col_style(col, Style(size=-1))
 
-    for col in range(1, len(df_db.columns)+1,1):
-        ws.set_col_style(col, Style(size=-1))
+   # if  (node_code == "Company" ): 
+        #    ws.set_col_style(27, Style(size=25))  #Custom_Conditional_Text
+        #    ws.set_col_style(28, Style(size=25))
+        #    ws.set_col_style(19, Style(size=25))  #tsr email
+        #    ws.set_col_style(20, Style(size=25))
+           #ws.set_col_style(col, Style(alignment=Alignment( horizontal = 'left') ))  
+
+    #for col in range(1, len(df_db.columns)+1,1):
+        #ws.set_col_style(col, Style(size=-1))
+    #    ws.set_col_style(col, Style(size=20))
         #ws.set_col_style(col, Style(alignment=Alignment( horizontal = 'left') )) and wrap not work
-     
-    if (node_code == "Company"):
-        ws.set_col_style(23, Style(size=18))
-        ws.set_col_style(24, Style(size=18))
-    elif  (node_code == "Node"):    
-        ws.set_col_style(19, Style(size=18))
-        ws.set_col_style(20, Style(size=18))
-        ws.set_col_style(7, Style(size=18))
+   
+ 
+    '''   
+    if (node_code == "Company" or node_code == "Node"):
+       
+        for col in range(1, len(df_db.columns)+1,1):
+        #ws.set_col_style(col, Style(size=-1))
+            #ws.set_col_style(col, Style(size=20))
+            pass
 
+    else :    
+       
+        for col in range(1, len(df_db.columns)+1,1):
+ 
+            ws.set_col_style(col, Style(size=-1))
+           # ws.set_col_style(col, Style(alignment=Alignment( horizontal = 'left') ))  
+'''
 def send_to_finance(filename1="", filename2=""):
-
-
+    
     signature_file = "C:\App\Data\Sig\sig.htm"
-    #signature_path = os.path.join((os.environ['USERPROFILE']), sig_files_path) # Finds the path to Outlook signature files with signature name "Work"
-    #html_doc = os.path.join((os.environ['USERPROFILE']),sig_html_path)     #Specifies the name of the HTML version of the stored signature
-    #html_doc = html_doc.replace('\\\\', '\\')
+    if os.path.exists(signature_file):
+        
+        #signature_path = os.path.join((os.environ['USERPROFILE']), sig_files_path) # Finds the path to Outlook signature files with signature name "Work"
+        #html_doc = os.path.join((os.environ['USERPROFILE']),sig_html_path)     #Specifies the name of the HTML version of the stored signature
+        #html_doc = html_doc.replace('\\\\', '\\')
 
 
-    html_file = codecs.open(signature_file, 'r', 'utf-8', errors='ignore') #Opens HTML file and converts to UTF-8, ignoring errors
-    signature_code = html_file.read()               #Writes contents of HTML signature file to a string
+        html_file = codecs.open(signature_file, 'r', 'utf-8', errors='ignore') #Opens HTML file and converts to UTF-8, ignoring errors
+        signature_code = html_file.read()               #Writes contents of HTML signature file to a string
 
-    #signature_code = signature_code.replace((signature_name + '_files/'), signature_path)      #Replaces local directory with full directory path
-    html_file.close()
-
-    
-    outlook = win32.Dispatch('outlook.application')
-    mail = outlook.CreateItem(0)
-    mail.To = "xiaobin.zhang@yardi.com"
+        #signature_code = signature_code.replace((signature_name + '_files/'), signature_path)      #Replaces local directory with full directory path
+        html_file.close()
 
     
-    mail.Subject = "Weekly Setup Audit - RS_AM@Yardi.Com ;   "  
-    
-    #filename2 =  filename1.replace('O:\\ANALYTICS\\New Property Lists\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\New Property Lists\\') # + filename.replace("/", ".") + ".xlsx"
-        #path  = "\"\\\\windows_Server\\golobal_directory\\the folder\\file yyymm.xlsx\""
-    path = '"' + filename1 + '"'
-    string  = """<a href=""" +  path + ' style=text-decoration: none>' + filename1 +  '<' +  r'\a'  + '>'
-    string =  string.replace('O:\\ANALYTICS\\Setup_Audit\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\Setup_Audit\\')
+        outlook = win32.Dispatch('outlook.application')
+        mail = outlook.CreateItem(0)
+        mail.To = "xiaobin.zhang@yardi.com"
 
-    path_2 = '"' + filename2 + '"'
-    string_2  = """<a href=""" +  path_2 + ' style=text-decoration: none>' + filename2 +  '<' +  r'\a'  + '>'
-    string_2 =  string_2.replace('O:\\ANALYTICS\\Setup_Audit\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\Setup_Audit\\')
+        
+        mail.Subject = "Weekly Setup Audit - RS_AM@Yardi.Com ; rs_is@yardi.com;   "  
+        
+        #filename2 =  filename1.replace('O:\\ANALYTICS\\New Property Lists\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\New Property Lists\\') # + filename.replace("/", ".") + ".xlsx"
+            #path  = "\"\\\\windows_Server\\golobal_directory\\the folder\\file yyymm.xlsx\""
+        path = '"' + filename1 + '"'
+        string  = """<a href=""" +  path + ' style=text-decoration: none>' + filename1 +  '<' +  r'\a'  + '>'
+        string =  string.replace('O:\\ANALYTICS\\Setup_Audit\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\Setup_Audit\\')
+
+        path_2 = '"' + filename2 + '"'
+        string_2  = """<a href=""" +  path_2 + ' style=text-decoration: none>' + filename2 +  '<' +  r'\a'  + '>'
+        string_2 =  string_2.replace('O:\\ANALYTICS\\Setup_Audit\\', '\\\ysifwfs07\\Vol2\ANALYTICS\\Setup_Audit\\')
+        
+        #  string.replace('\\a>', '\a>')
+        #mail.body = string
+        
+        mail.HTMLbody =   string + " <BR> " + string_2 +" <BR><BR><BR> "  +signature_code + " <BR><BR><BR> "
     
-      #  string.replace('\\a>', '\a>')
-    #mail.body = string
-     
-    mail.HTMLbody =   string + " <BR> " + string_2 +" <BR><BR><BR> "  +signature_code + " <BR><BR><BR> "
     
-    mail.send
+        mail.send
 
 
 def columnToLetter(column):
@@ -873,7 +944,8 @@ def kill_excel():
 def dispatch(app_name:str):
     try:
         from win32com import client
-        app = client.gencache.EnsureDispatch(app_name)
+       # app = client.gencache.EnsureDispatch(app_name)
+        app = win32.dynamic.Dispatch("Excel.Application")
     except AttributeError:
         # Corner case dependencies.
         import os
@@ -892,6 +964,7 @@ def dispatch(app_name:str):
  
 def run_part_two():
     wb = Workbook()
+     
 
     df_new_address = connect_rentgrow_data_frame(generate_address_sql())
     df_new_address.replace( np.nan, '',inplace = True)
@@ -909,19 +982,25 @@ def run_part_two():
     #df_new_company.to_excel (writer2,  sheet_name= 'Company', index=False, startrow=0,engine='xlsxwriter')
     df_new_criminal.replace( np.nan, '',inplace = True)
     write_to_book(wb, df_new_criminal, "Criminal")
-  
+    print ("Criminal done") 
 
     df_new_recommendation = connect_rentgrow_data_frame(generate_recommendation_sql())
     df_new_recommendation.replace( np.nan, '',inplace = True)
     write_to_book(wb, df_new_recommendation, "Recommendation")
-    print ("civil done") 
+
+    df_new_aal = connect_rentgrow_data_frame(generate_aal_sql())
+    df_new_aal.replace( np.nan, '',inplace = True)
+    write_to_book(wb, df_new_aal, "AAL Documents")
 
 
+    
+
+   
 
     wb.save(filename2_1)
  
    
-    excel =   dispatch('Excel.Application')
+    excel =   win32.dynamic.Dispatch("Excel.Application") 
     excel.Interactive = False
     excel.Visible = False
     excel.DisplayAlerts = False
@@ -945,25 +1024,24 @@ def run_part_one():
      
 
     wb = Workbook()
-   
  
     df_new_company = connect_rentgrow_data_frame (generate_company_sql())
-    list_am = connect_acct_manager()
-    df_new_company['Account Manager']=  df_new_company['Company_Code'].map(list_am.set_index('company_code')['account_manager']).fillna(df_new_company['Account Manager'])
+   # list_am = connect_acct_manager()
+    #df_new_company['Account Manager']=  df_new_company['Company_Code'].map(list_am.set_index('company_code')['account_manager']).fillna(df_new_company['Account Manager'])
     #df_new_company.to_excel (writer2,  sheet_name= 'Company', index=False, startrow=0,engine='xlsxwriter')
     #df_new_company.columns = [col.replace('_', ' ') for col in df_new_company.columns]
     df_new_company.replace( np.nan, '',inplace = True)
     write_to_book(wb, df_new_company, "Company")
     print ("comany done")
-    
+   
+
+
     df_new_prop = connect_rentgrow_data_frame(generate_node_sql())
     df_new_prop.replace( np.nan, '',inplace = True)
-    
+  
     write_to_book(wb, df_new_prop, "Node")
     print ("Node done") 
 
-
-   
 
     df_template = pd.read_excel(file_template)
     write_to_book(wb, df_template, "What's New")
@@ -971,7 +1049,7 @@ def run_part_one():
     wb.save(filename1_1)
  
 
-    excel =   dispatch('Excel.Application')
+    excel =  win32.dynamic.Dispatch("Excel.Application")
     excel.Interactive = False
     excel.Visible = False
     excel.DisplayAlerts = False
@@ -980,13 +1058,17 @@ def run_part_one():
 
     wb = excel.Workbooks.Open(filename1_1)
  
-    wb.SaveAs(filename1_2, FileFormat=50)  # 50 is the code for XLSB file format
+    wb.SaveAs(filename1_1_tmp, FileFormat=50)  # 50 is the code for XLSB file format
     excel.Application.Quit()
  
    # send_book (filename1, 'xiaobin.zhang@yardi.com' )
 
+    if os.path.exists(filename1_1_tmp):
+        shutil.copyfile(filename1_1_tmp, filename1_2)
+
     if os.path.exists(filename1_2):
         os.remove(filename1_1)
+        os.remove(filename1_1_tmp)
         print("Successfully! The file has been removed")
     else:
         print("Cannot delete the file as it doesn't exist")    
@@ -1004,7 +1086,9 @@ if __name__ == '__main__':
     if os.path.exists(filename1_2):
         pass
     else:
+          
         run_part_one()
+        
         
     print ("Part One Done!!!")
 
@@ -1012,10 +1096,8 @@ if __name__ == '__main__':
     if os.path.exists(filename2_2):
         pass 
     else: 
-       run_part_two()    
+        run_part_two()
     
-
- 
 
     send_to_finance(filename1_2, filename2_2 ) 
 

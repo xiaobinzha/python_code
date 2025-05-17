@@ -42,10 +42,10 @@ global year_start
 dirpath = os.getcwd()
 print (dirpath)
 #file_template =  dirpath +  '\\Template_2022.xlsx'
-file_template =  dirpath +  '\\Template_2024.xlsx'
+file_template =  dirpath +  '\\Template_2025.xlsx'
 file_template = file_template.replace('/','.',10)
 
-year_start = date(2024, 1, 1) 
+year_start = date(2025, 1, 1) 
 
 global file_ycrm 
 file_ycrm=  "O:\ANALYTICS\Consumer Relations" +  '\\ycrm_case.xlsx'
@@ -81,7 +81,7 @@ def generate_terminate_code ( ):
  
     cur = conn.cursor()
 
-    SQL = ("""   select company_code  from "Test_Code_Master"  ; """   )
+    SQL = ("""   select trim(company_code)  from "Test_Code_Master"  ; """   )
         
     cur.execute(SQL) 
     #col = cur.description

@@ -28,6 +28,8 @@ from functools import reduce
 from xlutils.copy import copy #work xls
 from xlrd import open_workbook
 import xlwt
+from pyexcelerate import Workbook, Color, Style, Fill
+import pyexcelerate
 
 dirpath = os.getcwd()
 print (dirpath)
@@ -39,9 +41,9 @@ start_day_month = date.today().replace(day=1) - timedelta(days=last_day_month.da
 
 start_day__qt =start_day_month - dateutil.relativedelta.relativedelta(months=2)
  
-file_temp =  dirpath +  '\\data.xls'
+file_temp =  dirpath +  '\\MNTUM.xls'
   
-filename1 =   dirpath +  '\\NTSD_' + str(last_day_month) + '.xlsx'
+filename1 =   dirpath +  '\\MNTUM_' + str(last_day_month) + '.xlsx'
 
 def add_header ():
     #wb = load_workbook(filename1)
@@ -68,9 +70,8 @@ def move_book(num_of_rows):
         k += 1
     book1.save(filename1)
 
-def write_book(header, df_new):
-    wb = load_workbook(filename1)
-    ws = wb['Duplicate Applicant Data']
+def write_book(header, df_new, ws, sheet_name = "dup"):
+   
 
     redFill =PatternFill(fill_type='solid',start_color='5B9BD5',end_color='5B9BD5') 
     side  = Side(border_style='thin',  color="FF000000")
@@ -104,26 +105,35 @@ def write_book(header, df_new):
         ws['A' + str(x)].fill = redFill       
         ws.cell(x, 1).font = Font(color="FFFFFF", name="Verdana", size=8)   
     
-    for x in range(1,68):
-        ws.cell(8, x).alignment = Alignment(wrapText=True)
+   
      
-     
-    o_companycode=''
-    df_new.reset_index(inplace = True,drop = True)
+    if (sheet_name == "dup"): 
 
-    for index, row in df_new.iterrows():
-        if (o_companycode != str(row[7])+str(row[9])+str(row[10]) + str(row[11]) ):
-            for col_num  in range(1, MAXCOL):
-                 ws.cell(index+TITLE_ROW+2, col_num).border = thick_border
-        else:
+        for x in range(1,68):
+            ws.cell(8, x).alignment = Alignment(wrapText=True)
+     
+        o_companycode=''
+        df_new.reset_index(inplace = True,drop = True)
+
+        for index, row in df_new.iterrows():
+            if (o_companycode != str(row['Credit Run'])+str(row["First Name"])+str(row["Last Name"]) + str(row["Property ID"]) ):
                 for col_num  in range(1, MAXCOL):
-                 ws.cell(index+TITLE_ROW+2, col_num).border = None #thin_border 
-        o_companycode = str(row[7])+str(row[9])+str(row[10]) + str(row[11])
-  
+                     ws.cell(index+TITLE_ROW+2, col_num).border = thick_border
+            else:
+                    for col_num  in range(1, MAXCOL):
+                     ws.cell(index+TITLE_ROW+2, col_num).border = None #thin_border 
+            o_companycode = str(row['Credit Run'])+str(row["First Name"])+str(row["Last Name"]) + str(row["Property ID"])  
+    else:
+         for index, row in df_new.iterrows():
+        
+                    for col_num  in range(1, MAXCOL):
+                     ws.cell(index+TITLE_ROW+2, col_num).border =  None #thin_border 
+        
+
     ws.auto_filter.ref = 'A8:BO8'
     ws.freeze_panes ='A9'
 
-    wb.save(filename1)
+
 
 def Emailer(message, subject, recipient):
     import win32com.client as win32   
@@ -139,13 +149,14 @@ def Emailer(message, subject, recipient):
     mail.Attachments.Add(attachment)
     mail.Display(True)
     #mail.Send()
+ 
 
 if __name__ == '__main__':
 
     data = pd.read_excel(file_temp, header=TITLE_ROW  ) # before the title name) #reading file
     df=data[data.duplicated(subset=['First Name', 'Last Name', 'Property ID', 'Credit Run'],keep=False )]
     #df_new=df.drop_duplicates(subset=['First Name', 'Last Name', 'Property ID', 'Original Score','Final Score','Credit Run'], keep = False )
-    df_new = df
+    df_new = df.copy()
  
     df_new=df_new.sort_values(by=['First Name', 'Last Name', 'Property ID', 'Applicant ID','Credit Run'])
     print(df_new['Positive Employment'])
@@ -153,15 +164,53 @@ if __name__ == '__main__':
     df_new.dropna()
     header = add_header()
     
-    #header.append (df_new, ignore_index=True, sort=False)
-    #df_new=header
-    #print (df_new)
+
+    df_group  =data.copy()
+    df_group['Total_Apps'] =0
+    df_group['Total_Unique'] =0
+    df_group['Dup_field'] = df_group['Property ID'] + df_group['Property Name'] +df_group['First Name']+df_group['Last Name']+str(df_group['Credit Run'])
+
+   # df_group['Total_Apps'] = df_group.groupby(['Property ID','Property Name'])['Applicant ID'].transform(lambda x: x.count())
+
+    #counts =df_group.groupby(['Property ID','Property Name', 'First Name', 'Last Name', 'Credit Run'])
+    #counts = df_group[['Property ID','Property Name', 'First Name', 'Last Name', 'Credit Run']].value_counts() 
+    df_group['Total_Apps'] = df_group.groupby(['Property ID','Property Name'])['Applicant ID'].transform(lambda x: x.count())
+    df_group['Total_Unique'] = df_group.groupby(['Property ID','Property Name'])['Dup_field' ].transform(lambda x: x.nunique())
+    
+    #df_group=df_group.groupby(['Property ID','Property Name', 'First Name', 'Last Name', 'Credit Run'], as_index=False).agg([ 'count', 'nunique'])#.reset_index() 
+    #df_group=df_group().to_frame()
+    
+
+    #df_group['Total_Unique'] = df_group.groupby.groupby(['Property ID','Property Name', "First Name", "Last Name", "Credit Run"])['sales'].rank(ascending=False)
+    df_group = df_group[['Property ID', 'Property Name', 'Total_Apps', 'Total_Unique']]
+    df_group=df_group.drop_duplicates(subset=['Property ID', 'Property Name', 'Total_Apps', 'Total_Unique'], keep = 'first' )
+    
+
+
+
+
     df_new['Positive Employment'] = '=CONCATENATE("' + df_new['Positive Employment'] + '")'
     df_new['Positive Housing'] = '=CONCATENATE("' + df_new['Positive Housing'] + '")'
+    writer2 = pd.ExcelWriter(filename1)
+
+    #df_new.to_excel (filename1, sheet_name='Duplicate Applicant Data', index=False, startrow=TITLE_ROW)
+    df_new.to_excel (writer2, sheet_name='Duplicate Applicant Data', index=False, startrow=TITLE_ROW)
+    data.to_excel (writer2, sheet_name='All Applicant Data', index=False, startrow=TITLE_ROW)
+    df_group.to_excel (writer2, sheet_name='Duplicate Summary', index=False, startrow=1)
+
+    writer2.close() 
+    #move_book(len(data))
+
+    wb = load_workbook(filename1)
+    ws = wb['Duplicate Applicant Data'] 
+    write_book(header, df_new, ws, "dup")
     
-    df_new.to_excel (filename1, sheet_name='Duplicate Applicant Data', index=False, startrow=TITLE_ROW)
-   # move_book(len(data))
-    write_book(header, df_new)
+    ws = wb['All Applicant Data'] 
+    write_book(header, data, ws)
+
+
+    wb.save(filename1)
+
     attachment  =  filename1  
 
     filelink = """
@@ -170,7 +219,7 @@ if __name__ == '__main__':
 
 #print (filelink)
 #Emailer(filelink, "New pinac for jen.C@Yardi.Com@Yardi.Comis attached", "xiaobin.zhang@yardi.com") 
-Emailer(filelink, "Case 10091404 Monthly Dup Report-- 	Carl.Enberg@Yardi.com", "xiaobin.zhang@yardi.com") 
+#Emailer(filelink, "Case 10091404 Monthly Dup Report-- 	Carl.Enberg@Yardi.com", "xiaobin.zhang@yardi.com") 
 
 
     

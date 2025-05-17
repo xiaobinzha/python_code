@@ -46,7 +46,7 @@ warnings.filterwarnings("ignore")
 import re 
 from tkinter import filedialog
 from tkinter import * 
-
+import tkinter as tk
 
 dirpath = os.getcwd()
 print (dirpath)
@@ -77,15 +77,20 @@ filename1 = "O:\\ANALYTICS\\Reports\\SNAPPT\\SNAPPT "  +   filename.replace("/",
 
 redFill =PatternFill(fill_type='solid',start_color='5B9BD5',end_color='5B9BD5') 
 greenFill =PatternFill(fill_type='solid',start_color='b2f5d9',end_color='b2f5d9') 
+yellowFill =PatternFill(fill_type='solid',start_color='Ffff00',end_color='Ffff00') 
 side  = Side(border_style='thin',  color="FF000000")
 border  = Border(left=side, right=side, top=side, bottom=side)
 side_thin  = Side(border_style='thin',  color="FF000000")
 
 
 
-#prior_file = "O:\\ANALYTICS\\Reports\\SNAPPT\\SNAPPT 6.17.24"  + ".xlsx"  
-prior_file = filedialog.askopenfilename(initialdir = "O:\ANALYTICS\Reports\SNAPPT" + "/",title = "Select Prior file       ",filetypes = (("excel files","*.xlsx"),("all files","*.*"))) 
-
+#prior_file = "O:\\ANALYTICS\\Reports\\SNAPPT\\SNAPPT 6.17.24"  + ".xlsx" 
+root = tk.Tk()
+root.attributes('-alpha', 0.0)
+# Always have it on top
+root.attributes('-topmost', True) 
+prior_file = tk.filedialog.askopenfilename(parent=root,initialdir = "O:\ANALYTICS\Reports\SNAPPT" + "/",title = "Select Prior file       ",filetypes = (("excel files","*.xlsx"),("all files","*.*"))) 
+root.destroy()
 
 if  not os.path.exists(prior_file):
         output = easygui.msgbox("There is no last week file! ", "Error")
@@ -158,7 +163,7 @@ def save_workbook (s_name):
     #for i in range  (1, getNumSheet ):
       #  excel.Worksheets(i).Activate() 
 
-    wb.Worksheets('SNAPPT Active').Select()    
+    wb.Worksheets('SNAPPT').Select()    
     excel.ActiveSheet.Columns.AutoFit()
 
  
@@ -169,6 +174,41 @@ def save_workbook (s_name):
     wb.Close()
  
  
+def connect_trans ():
+    SQL =    ( """  
+             
+   select node_code,min(dtcreated)::date first_invite_date,  max(dtcreated)::date last_invite_date  from voi_snappit_invite_applicant  
+group by node_code  
+
+"""  )
+    list_term_code =  generate_terminate_code () 
+
+    string_replace = "  ('" + "','".join(name.upper().strip().replace("'", r"\'") for name in list_term_code) + "'"  + ')'
+    SQL = SQL.replace(   "('APP')",   string_replace     )
+
+    conn = None
+ 
+    params = config()
+    conn = psycopg2.connect(**params)       
+    cur = conn.cursor()
+    cur.execute(SQL) 
+    col = [i[0] for i in cur.description]
+    conn.set_client_encoding('ISO-8859-1') 
+    rows = cur.fetchall()
+    cur.close()
+    trans_data = pd.DataFrame(rows, columns = col)
+
+   # Row_list =[] 
+  
+# Iterate over each row 
+   # for rows in data.itertuples(): 
+    # Create list for the current row 
+   #     my_list =[rows.dd, rows.dd_1, rows.dd_2] 
+      
+    # append the list to the final list 
+   # Row_list.append(my_list) 
+    return trans_data
+
 
 ##### weekly
 
@@ -177,12 +217,14 @@ def connect_all_prop ():
              
   select  co_code, company_name, pr_code, market_rate_units,  (select vendor_name from services where voi = service_id) voi, 
 (select vendor_name from services where voi_ondmd = service_id) voi_on_demand, 
-node_name, node_city, node_state, auxiliary_node.email_address as contact_email , null as first_show_on_report  , null   first_show --,  to_char(current_date,'MM/DD/YYYY') as first_show_on_report
+node_name, node_city, node_state, auxiliary_node.email_address as contact_email , null as first_show_on_report  , null   first_show, --,  to_char(current_date,'MM/DD/YYYY') as first_show_on_report,
+            null   first_invite_date, null  last_invite_date
+               
 
  from node_services inner join  node_tbl on  pr_code = node_tbl.node_code inner join  auxiliary_node on node_tbl.node_code=auxiliary_node.node_code inner join 
 	 company_tbl  on company_tbl.company_code=node_tbl.company_code  
 	 where canceled = false 
-	 and    (voi_tier=29 or voi_ondmd=29) 
+	 and    (voi=29 or voi_ondmd=29) 
  and pr_code = node_tbl.node_code  and auxiliary_node.node_code=node_tbl.node_code 
  and node_tbl.company_code = company_tbl.company_code
  and company_tbl.company_code not in ('APP') 
@@ -217,6 +259,36 @@ node_name, node_city, node_state, auxiliary_node.email_address as contact_email 
     return data
       
    
+def connect_cancelled_prop ():
+    SQL =    ( """  
+             
+  select  node_code from  node_tbl   where canceled = true 
+ 
+"""  )
+    
+
+    conn = None
+ 
+    params = config()
+    conn = psycopg2.connect(**params)       
+    cur = conn.cursor()
+    cur.execute(SQL) 
+    col = [i[0] for i in cur.description]
+    conn.set_client_encoding('ISO-8859-1') 
+    rows = cur.fetchall()
+    cur.close()
+    data = pd.DataFrame(rows, columns = col)
+
+   # Row_list =[] 
+  
+# Iterate over each row 
+   # for rows in data.itertuples(): 
+    # Create list for the current row 
+   #     my_list =[rows.dd, rows.dd_1, rows.dd_2] 
+      
+    # append the list to the final list 
+   # Row_list.append(my_list) 
+    return data
 
 def connect_old_book():
      
@@ -229,35 +301,56 @@ def connect_old_book():
     old_data.columns = [x.replace("\n", " ") for x in old_data.columns.tolist()]
     #data_dict=data_dict.drop(['Property ID'], inplace=True, axis=1 ) 
     old_data.rename(columns=lambda x: x.strip(),   inplace=True)
-    old_data = old_data.sort_values (by= ['ID', 'first_show_on_report'] )
+    old_data = old_data.sort_values (by= ['Disabled',   'first_show_on_report', 'co_code','ID']  )
 
 
     old_data['Node Code']=old_data['Node Code'].str.strip() 
     old_data['Node Code']=old_data['Node Code'].str.upper()
-
+    
+    old_data= old_data.drop_duplicates('Node Code', keep=FIRST)
 
     all_data = connect_all_prop()
+ 
+    disabled_node = old_data[~(old_data['Node Code'].isin(all_data['pr_code'].values.tolist()))] 
 
+    cancelled_node = connect_cancelled_prop()
     
+    disabled_node = disabled_node[~disabled_node['Node Code'].isin(cancelled_node['node_code'])]
+
+    disabled_node ['Disabled'] = 'Yes'
+    disabled_node ['voi'] = ''
+    disabled_node ['voi_on_demand'] = ''
+    disabled_node ['first_show'] = 'No'
     
-    new_data_old=all_data[(all_data['pr_code'].isin(old_data['Node Code'].values.tolist()))]
+
+    disabled_node['first_show_on_report'] = pd.to_datetime(disabled_node['first_show_on_report']).dt.date 
+    
+    disabled_node = disabled_node.sort_values (by= ['Disabled',   'first_show_on_report', 'co_code', 'node_name' ]  )
+  
+    disabled_node.insert(1, 'NEW_ID', range(1, 1 + len(disabled_node)))
+    #disabled_node ["ID"] = disabled_node['NEW_ID']
+
+    disabled_node = disabled_node.drop (['ID' ] , axis = 1)
+
+    disabled_node.rename(columns={'Node Code': 'pr_code' }, inplace=True)
+
+    new_data_old=all_data[(all_data['pr_code'].isin(old_data['Node Code'].values.tolist()))]  ## all active nodes
     new_data_old ['first_show_on_report'] =   new_data_old['pr_code'].map(old_data.set_index('Node Code')['first_show_on_report']).fillna(new_data_old['first_show_on_report'])
-    
-  #  new_data_old ['NEW_ID'] =0
-   # new_data_old ['NEW_ID'] =   new_data_old['pr_code'].map(old_data.set_index('Node Code')['ID']).fillna(new_data_old['NEW_ID'])
-   # new_data_old ['NEW_ID'].astype(int)
+   
 
     new_data_old.insert(0, "NEW_ID", 0)
     new_data_old ['NEW_ID'] =   new_data_old['pr_code'].map(old_data.set_index('Node Code')['ID']).fillna(new_data_old['NEW_ID'])
     
-    new_data_old = new_data_old.sort_values (by= ['NEW_ID'  ] )
+    new_data_old['first_show_on_report']=   pd.to_datetime(new_data_old['first_show_on_report'] ).dt.date
+
+    new_data_old = new_data_old.sort_values (by= ['first_show_on_report', 'co_code', 'node_name'  ] )
     new_data_old.reset_index(inplace=True, drop=True)
 
-    l = []
+    l_ID = []
     for index, row in new_data_old.iterrows():
-        l.append(index+1)
+        l_ID.append(index+1)
 
-    new_data_old['NEW_ID'] =l
+    new_data_old['NEW_ID'] =l_ID
    # new_data_old.drop(['ID'],inplace=True, axis=1)
    # new_data_old.reset_index()
 
@@ -271,27 +364,32 @@ def connect_old_book():
     new_data_new['first_show_on_report']= pd.to_datetime('today').date().strftime('%m/%d/%Y')
 
     #new_data_new.drop(['NEW_ID'],inplace=True, axis=1)
-                        
+    new_data_new =        new_data_new.sort_values (by= ['first_show_on_report', 'co_code' , 'node_name' ] )             
     new_data_new.insert(0, 'NEW_ID', range(len(new_data_old)+1, len(new_data_new) + len(new_data_old)+1))
  
    
     #df = pd.concat([df_dd_2_new, df_dd_1_new, df_dd_new  ]).drop_duplicates('node_code', keep=FIRST)
+    new_data_old ['Disabled'] = 'No'
+    new_data_new ['Disabled'] = 'No'
 
-    df = pd.concat([ new_data_old, new_data_new   ])#.drop_duplicates('node_code', keep=FIRST)
+    df = pd.concat([ new_data_old, new_data_new, disabled_node   ])#.drop_duplicates('node_code', keep=FIRST)
  
-    df['first_show_on_report'] = pd.to_datetime(df['first_show_on_report'], format='%m/%d/%Y') 
-    df['first_show_on_report'] = df['first_show_on_report'].dt.strftime('%m/%d/%Y')
+    df['first_show_on_report'] = pd.to_datetime(df['first_show_on_report']).dt.date 
+   # df['first_show_on_report'] = df['first_show_on_report'].dt.strftime('%m/%d/%Y')
    # df ['max_code']=   df.groupby('type')['company_code'].transform('max')
     #df ['min_code']=   df.groupby('type')['company_code'].transform('min')
 
- 
+    list_trans = connect_trans()
+    df['first_invite_date']=  df['pr_code'].map(list_trans.set_index('node_code')['first_invite_date']).fillna(df['first_invite_date'])
+    df['last_invite_date']=  df['pr_code'].map(list_trans.set_index('node_code')['last_invite_date']).fillna(df['last_invite_date'])
     df.replace(np.nan, '',   regex=True, inplace=True)
   
     #df.insert(0, 'New_ID', range(1, 1 + len(df)))
     
-    #df = df.drop (['is_old', 'id' ] , axis = 1)
+    #df = df.drop (['ID', 'Node Code' ] , axis = 1)
     
-    df = df.sort_values (by= ['NEW_ID'  ] )
+    
+    df = df.sort_values (by= ['Disabled', 'NEW_ID'  ] )
     df.reset_index(inplace=True, drop=True)  
     
     return df
@@ -301,6 +399,7 @@ def connect_old_book():
 
 def write_dup_book(header, df_new,  ws):
     MAXCOL=len(df_new.columns)  + 2
+
     for x in range(1,len(df_new.columns)+1):
          
         ws.cell(1, x).fill = redFill     
@@ -309,15 +408,26 @@ def write_dup_book(header, df_new,  ws):
      
     o_companycode=n_code=''
     df_new.reset_index(inplace = True,drop = True)
-
+    first_time = True 
     for index, row in df_new.iterrows():
       
-            if (o_companycode  !=  ( str(row[11]  )  )):    #11 and n_code  !=  ( str(row[0])  )
+            if (  o_companycode  !=   str(row[11]  ) and  row[15]=='No' )   :    #11 and n_code  !=  ( str(row[0])  ) first_show_on_report
               for col_num  in range(1, MAXCOL-1):
                    ws.cell(index+2, col_num).border =  thick_border
+          
+                 
+
             if (str(row[12]) == 'Yes') :
               for col_num  in range(1, MAXCOL-1):
                        ws.cell(index+2, col_num).fill = greenFill   
+            if (str(row[15]) == 'Yes') :
+              for col_num  in range(1, MAXCOL-1):
+                       ws.cell(index+2, col_num).fill = yellowFill   
+              if(first_time==True):
+                   for col_num  in range(1, MAXCOL-1):
+                       ws.cell(index+2, col_num).border =  thick_border
+                       ws.cell(index+2, col_num).border =  thick_border
+                   first_time=False
                       
             ws.cell(index+2, col_num).alignment = Alignment(horizontal='center', vertical = 'center')         
             o_companycode = (str(row[11])   ) #[0:6] #11
@@ -327,7 +437,7 @@ def write_dup_book(header, df_new,  ws):
                    ws.cell(index+3, col_num).border = thick_border
                    ws.cell(index+3, col_num).alignment = Alignment(horizontal='center', vertical = 'center')
     
-    ws.auto_filter.ref = 'A1:M1'
+    ws.auto_filter.ref = 'A1:P1'
     ws.freeze_panes ='A2'
 
    
@@ -431,46 +541,61 @@ def kill_excel():
 
 
 if __name__ == '__main__':
-    
-     
-    # connect old data
     kill_excel()
-    df_new_prop = connect_old_book()
+
+    if os.path.exists(filename1 ):
+         os.remove(filename1) # send_to_finance(filename1) 
  
-  
+          
+    f = open("weekly_snappt.txt", "w") 
+    error = 0
     
-    #data.to_excel (filename1, sheet_name='duplidate property', index=False) #, startrow=0
-
-    writer2 = pd.ExcelWriter(filename1)
-    df_new_prop.reset_index(  inplace=True, drop=True)
-    
-
-    df_new_prop = df_new_prop 
-    df_new_prop.rename(columns={'NEW_ID': 'ID', 'pr_code': 'Node Code'}, inplace=True)
-    df_new_prop.to_excel (writer2,  sheet_name= 'SNAPPT Active', index=False, startrow=0)
-   
-    writer2.close() 
-    
-
-
-    wb = load_workbook(filename1)
-    ws = wb['SNAPPT Active']
-
-    # todolist
-     
-    write_dup_book(filename1, df_new_prop,   ws)
-   
-   
-    
-    wb.save(filename1)
-    save_workbook (filename1) 
-  
-   
-    send_to_finance(filename1) 
-   # send_book (filename1, 'xiaobin.zhang@yardi.com' )
+    try:
  
-  
+        df_new_prop = connect_old_book()
+
+
+
+        #data.to_excel (filename1, sheet_name='duplidate property', index=False) #, startrow=0
+
+        writer2 = pd.ExcelWriter(filename1)
+        df_new_prop.reset_index(  inplace=True, drop=True)
+
+
+        df_new_prop = df_new_prop 
+        df_new_prop.rename(columns={'NEW_ID': 'ID', 'pr_code': 'Node Code'}, inplace=True)
+        df_new_prop.to_excel (writer2,  sheet_name= 'SNAPPT', index=False, startrow=0)
+
+        writer2.close() 
+
+
+
+        wb = load_workbook(filename1)
+        ws = wb['SNAPPT']
+
+        # todolist
+            
+        write_dup_book(filename1, df_new_prop,   ws)
+
+
+
+        wb.save(filename1)
+        save_workbook (filename1) 
+
+
     
+        #send_book (filename1, 'xiaobin.zhang@yardi.com' )
+
+    except Exception as Argument:
+
+        f.write(str(Argument))
+        error =1 
+    finally: 
+        send_to_finance(filename1)     
+        f.close() 
     
+        if (error ==0 and os.path.exists(f.name)): 
+            os.remove(f.name)
+
 sys.exit(0)
 quit()
