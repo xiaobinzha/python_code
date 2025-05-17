@@ -128,8 +128,8 @@ CASE WHEN an.outgoing_notification=0 THEN 'None'
 						END as Email_FCRA_Letters_To, 
   	 
 UPPER(CAST (fcra_batch_enabled   as text)) fcra_batch_enabled  , 
-UPPER(CAST (show_late_payment_letter as text)) show_late_payment_letter,
-UPPER(CAST (allow_custom_fcra_reasons as text)) allow_custom_fcra_reasons,
+--UPPER(CAST (show_late_payment_letter as text)) show_late_payment_letter, 3/13/25
+--UPPER(CAST (allow_custom_fcra_reasons as text)) allow_custom_fcra_reasons,3/13/25
 UPPER(CAST (an.allow_fcra_letter_generation as text)) allow_fcra_letter_generation,
 
 --UPPER(CAST (autoemail_fcraletter as text)) autoemail_fcraletter, 
@@ -205,8 +205,8 @@ CASE WHEN an.show_prem_crim_res=0 THEN 'Never'
  UPPER(CAST (an.rejection_reason_custom_criminal AS TEXT)) AS rejection_reason_custom_criminal,
 
 client_crim_pre_decision as crim_record_assessment, --4/13/2023
-UPPER(CAST (an.crim_email AS TEXT)) AS crim_email,
-	UPPER(CAST((an.comp_recommendation&1>0) AS TEXT)) AS comprehensive_recommendation,
+--UPPER(CAST (an.crim_email AS TEXT)) AS crim_email, --3/13/2025
+	--UPPER(CAST((an.comp_recommendation&1>0) AS TEXT)) AS comprehensive_recommendation, 3/13/25
 --	an.default_recommendation,
 replace( replace( 
 replace(  
@@ -234,7 +234,7 @@ replace( replace(replace(an.default_recommendation,
   '%%7E' , '~' ) default_recommendation,
 
 	UPPER(CAST(an.gen_comp AS TEXT)) AS generate_comp_score_wo_credit, 
-	an.fa_credit_score AS no_ssn_score, 
+	--an.fa_credit_score AS no_ssn_score, 3/13/25
 	an.score_without_credit, 
 /* Automatic Service */
 	--tsc.ts_credit_report, 6/20/18
@@ -380,8 +380,8 @@ case when crim_pre_aal = 'Yes' then 'Enabled' else 'Disabled' end as  PreAdverse
 case   preaal_template_id when 36 then 'Pre-AAL Cook County' when 38 then 'Test_PreAAL'  when 40 then 'Generic Pre-AAL' else '' end  as  PreAdverse_Action_Letter_Template, 
 
 reconsider_request_period || ' ' ||  reconsider_period_in as Reconsideration_Request_Period, 
-reconsider_review_period || ' ' || reconsider_period_in as Reconsideration_Review_Period,
- case when coalesce(an.b2b_screening_workflow,false)= false then 'Off' else 'On' end as Alternate_Screening_Criteria_Rules--, 
+reconsider_review_period || ' ' || reconsider_period_in as Reconsideration_Review_Period--,
+ --case when coalesce(an.b2b_screening_workflow,false)= false then 'Off' else 'On' end as Alternate_Screening_Criteria_Rules--, 3/15/25
 --to_char(nt.create_stamp , 'MM/DD/YYYY'::text)   || ' ' || to_char(nt.create_stamp, 'HH24:MI:SS'::text) AS setup_date
 
 	 
@@ -1176,7 +1176,7 @@ def test_sheet(ws, df, col) :
  
    
     ws.set_row(0, None, header_fmt)
-    ws.autofilter('A1:DZ1')
+    ws.autofilter('A1:DT1')
     #mycell = ws['B3']
     ws.freeze_panes(1,5)
     #ws.freeze_panes(1,0)
@@ -1249,14 +1249,14 @@ def Emailer(message, subject, recipient):
     #mail.Send()
 
 if __name__ == '__main__':
-#try:
-    writer = pd.ExcelWriter(filename1, engine='xlsxwriter'  )  
-    wb  = writer.book
-    connect_compare(writer, wb)
-    connect_setup_audit(writer,wb)
-    new_template (writer, wb)
-    writer.close()  
-    
+    if not os.path.exists(filename1):
+        writer = pd.ExcelWriter(filename1, engine='xlsxwriter')  
+        wb = writer.book
+        connect_compare(writer, wb)
+        connect_setup_audit(writer,wb)
+        new_template (writer, wb)
+        writer.close()  
+
 #except Exception as e:
  #logger.info(e)
 
@@ -1264,13 +1264,24 @@ if __name__ == '__main__':
     #attachment  = '"' + filename1 + '"'
 #print (attachment)
     #filelink = """<p>  <a href=%s>%s</a>  </p>"""%(attachment, attachment)
-    
-    send_to_qa(filename1  ) 
-    
-
-    #print (filelink)
  
+    f = open("weekly_property_error.txt", "w") 
+    error = 0
+    try:
+          send_to_qa(filename1  ) 
+		#  pass
+	# send_book (filename1, 'xiaobin.zhang@yardi.com' )
+    except Exception as Argument:
 
+        f.write(str(Argument))
+        error =1   
+    finally:
+        f.close() 
+        if (error ==0 and os.path.exists(f.name)): 
+            os.remove(f.name)
+
+ 
+ 
 
 sys.exit(0)
 
